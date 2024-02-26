@@ -7,9 +7,13 @@ import { redirect } from 'next/navigation';
 // Base Date Shape
 const FormSchema = z.object({
   id: z.string(),
-  customerId: z.string(),
-  amount: z.coerce.number(),
-  status: z.enum(['pending', 'paid']),
+  customerId: z.string({
+    invalid_type_error: 'Please select a customer.',
+  }),
+  amount: z.coerce.number().gt(0, {message: 'Please enter an anmount greater than $0.00' }),
+  status: z.enum(['pending', 'paid'], {
+    invalid_type_error: 'Please select an invoice status.',
+  }),
   date: z.string(),
 });
 
@@ -19,12 +23,29 @@ const CreateInvoice = FormSchema.omit({id: true, date: true});
 // Edit Schema
 const UpdateInvoice = FormSchema.omit({id: true, date: true});
 
-export async function createInvoice(formData: FormData) {
-  const {customerId, amount, status} = CreateInvoice.parse({
+export type State = {
+  errors?: {
+    customerId?: string[];
+    amount?: string[];
+    status?: string[];
+  };
+  message?: string | null;
+};
+
+export async function createInvoice(prevState: State, formData: FormData) {
+  const validatedFields = CreateInvoice.safeParse({
     customerId: formData.get('customerId'),
     amount: formData.get('amount'),
     status: formData.get('status'),
   });
+  if (!validatedFields.success) {
+    return {
+      errors: validatedFields.error.flatten().fieldErrors,
+      message: 'Missing Fields. Failed to Create Invoice.',
+    };
+  }
+  const {customerId, amount, status} = validatedFields.data;
+
   // Store in cents;
   const amountInCents = amount * 100;
   // Format Date
@@ -35,12 +56,13 @@ export async function createInvoice(formData: FormData) {
       INSERT INTO invoices (customer_id, amount, status, date)
       VALUES (${customerId}, ${amountInCents}, ${status}, ${date})
     `;
-
-    revalidatePath('/dashboard/invoices');
-    redirect('/dashboard/invoices');
   } catch (e) {
-    return {message: `Database Error: Something went wrong trying to create that invoice`};
+     return {
+      message: 'Database Error: Failed to Create Invoice.',
+    };
   }
+  revalidatePath('/dashboard/invoices');
+  redirect('/dashboard/invoices');
 }
 
 export async function updateInvoice (id: string, formData: FormData) {
